@@ -766,6 +766,18 @@ with st.sidebar:
 
     st.markdown("---")
     if _ai_available:
+        _MODEL_DESC = {
+            "phi3:mini":    "⚡ fastest · ~5s",
+            "phi3:medium":  "⚡ fast · ~10s",
+            "mistral":      "⚖️ balanced · ~15s",
+            "mistral:7b":   "⚖️ balanced · ~15s",
+            "llama3.1:8b":  "🧠 capable · ~30s",
+            "llama3.1:70b": "🧠 most capable · slow",
+            "llama3:8b":    "🧠 capable · ~30s",
+            "gemma:7b":     "⚖️ balanced · ~20s",
+            "gemma2:9b":    "⚖️ balanced · ~20s",
+            "qwen2.5:7b":   "⚖️ balanced · ~20s",
+        }
         available_models = detect_ollama_models()
         if available_models:
             gpu_status = detect_gpu()
@@ -773,9 +785,11 @@ with st.sidebar:
             st.markdown(f'<div style="background:#081a0f;border:1px solid #14532d;border-radius:10px;padding:10px 14px;color:#86efac;font-size:0.8rem;margin-bottom:8px">🟢 &nbsp;AI online &nbsp;{gpu_label}</div>', unsafe_allow_html=True)
             current_model = _get_ollama_model()
             default_idx = available_models.index(current_model) if current_model in available_models else 0
-            chosen = st.selectbox("Model", available_models, index=default_idx,
-                                  label_visibility="collapsed",
-                                  help="Faster models: phi3:mini > mistral > llama3.1")
+            chosen = st.selectbox(
+                "Model", available_models, index=default_idx,
+                label_visibility="collapsed",
+                format_func=lambda m: f"{m} — {_MODEL_DESC[m]}" if m in _MODEL_DESC else m,
+            )
             if chosen != st.session_state.get("selected_model"):
                 st.session_state["selected_model"] = chosen
         else:
@@ -1155,7 +1169,7 @@ with tab3:
                 if not _ai_available: _ai_warn()
                 else:
                     ctx = build_dota_match_context(md, hero_map)
-                    hf_section = f"\n\nHERO FOCUS — Provide a dedicated section analysing {hero_focus}'s specific performance: what went wrong, mistakes, missed opportunities, itemisation, and improvement advice." if hero_focus != "All Heroes" else ""
+                    hf_section = f"\n\nHERO FOCUS — Provide a dedicated section analyzing {hero_focus}'s specific performance: what went wrong, mistakes, missed opportunities, itemisation, and improvement advice." if hero_focus != "All Heroes" else ""
                     system = """You are an expert Dota 2 analyst. CRITICAL: Begin with 2-3 sentences of dramatic Dota 2 lore narrative describing this clash between these specific heroes. Reference actual lore, rivalries, character motivations. Then add --- and give your structured analysis.
 
 Required sections:
@@ -1167,7 +1181,7 @@ Required sections:
 6. Critical Moments — 3-5 pivotal timestamps
 7. Key Lessons — 3 specific actionable takeaways"""
                     result = render_ai_output(
-                        f"Analyse this Dota 2 match from {perspective} perspective:{hf_section}\n\n{ctx}",
+                        f"Analyze this Dota 2 match from {perspective} perspective:{hf_section}\n\n{ctx}",
                         system=system, max_tokens=1500)
                     if result:
                         st.session_state["dota_analysis"] = result
@@ -1424,12 +1438,12 @@ with tab5:
                 st.plotly_chart(fig_peers, use_container_width=True)
 
             sec("AI TEAMMATE ANALYSIS", "🤖")
-            if st.button("Analyse Teammates", type="primary", key="ai_peers"):
+            if st.button("Analyze Teammates", type="primary", key="ai_peers"):
                 if not _ai_available: _ai_warn()
                 else:
                     ctx = build_peers_context(peers_data)
                     render_ai_output(
-                        f"Teammate data:\n{ctx}\n\nAnalyse:\n1. Who are the top 2-3 players to queue with and why?\n2. Which players are hurting win rate?\n3. Any patterns — winning with certain player types (supports, carries)?\nStart with a 2-sentence Dota lore narrative about allies and teamwork then ---.",
+                        f"Teammate data:\n{ctx}\n\nAnalyze:\n1. Who are the top 2-3 players to queue with and why?\n2. Which players are hurting win rate?\n3. Any patterns — winning with certain player types (supports, carries)?\nStart with a 2-sentence Dota lore narrative about allies and teamwork then ---.",
                         system="You are a Dota 2 expert. Short, direct, actionable.",
                         max_tokens=600)
     footer()
@@ -1567,12 +1581,12 @@ with tab6:
                         kpi(row["icon"], row["label"], val_str, sub, row["color"])
 
         sec("AI PERFORMANCE ANALYSIS", "🤖")
-        if st.button("Analyse Performance Trends", type="primary", key="ai_trends"):
+        if st.button("Analyze Performance Trends", type="primary", key="ai_trends"):
             if not _ai_available: _ai_warn()
             else:
                 ctx = build_totals_context(totals_data, matches_300)
                 render_ai_output(
-                    f"Performance data:\n{ctx}\n\nAnalyse:\n1. What habit or timing pattern stands out most (peak hours, day patterns)?\n2. Are there tilt indicators (long loss streaks, late-night losing)?\n3. One specific, actionable improvement to raise win rate.\nStart with a 2-sentence Dota lore narrative about perseverance then ---.",
+                    f"Performance data:\n{ctx}\n\nAnalyze:\n1. What habit or timing pattern stands out most (peak hours, day patterns)?\n2. Are there tilt indicators (long loss streaks, late-night losing)?\n3. One specific, actionable improvement to raise win rate.\nStart with a 2-sentence Dota lore narrative about perseverance then ---.",
                     system="You are a Dota 2 performance coach. Be specific and direct.",
                     max_tokens=600)
     footer()
@@ -1669,12 +1683,12 @@ with tab7:
             st.markdown(word_html, unsafe_allow_html=True)
 
         sec("AI BEHAVIOR ANALYSIS", "🤖")
-        if st.button("Analyse Behavior", type="primary", key="ai_behavior"):
+        if st.button("Analyze Behavior", type="primary", key="ai_behavior"):
             if not _ai_available: _ai_warn()
             else:
                 ctx = build_behavior_context(wordcloud_data, wardmap_data)
                 render_ai_output(
-                    f"Player behavior data:\n{ctx}\n\nAnalyse:\n1. What does the chat behavior reveal (toxic, friendly, shot-caller, silent)?\n2. What does the ward placement ratio say about support quality and vision game?\n3. One specific change that would most improve their win rate from a behavioral standpoint.\nStart with a 2-sentence Dota lore narrative about vision and control of the map then ---.",
+                    f"Player behavior data:\n{ctx}\n\nAnalyze:\n1. What does the chat behavior reveal (toxic, friendly, shot-caller, silent)?\n2. What does the ward placement ratio say about support quality and vision game?\n3. One specific change that would most improve their win rate from a behavioral standpoint.\nStart with a 2-sentence Dota lore narrative about vision and control of the map then ---.",
                     system="You are a Dota 2 behavioral analyst. Be direct and insightful.",
                     max_tokens=600)
     footer()
@@ -1757,7 +1771,7 @@ For each team provide:
 - Lane assignment recommendations
 
 Be specific about the heroes picked."""
-            result = render_ai_output(f"Analyse this Dota 2 draft:\n\n{draft_ctx}", system=system, max_tokens=900)
+            result = render_ai_output(f"Analyze this Dota 2 draft:\n\n{draft_ctx}", system=system, max_tokens=900)
             if result:
                 st.session_state["dota_draft_rec"] = result
                 st.session_state["dota_draft_ctx"] = draft_ctx

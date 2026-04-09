@@ -4,7 +4,7 @@ Per-tab visual design, hero artwork backgrounds, custom HTML tables.
 """
 from __future__ import annotations
 
-import os, io, base64
+import os, io, base64, json, time
 from datetime import datetime
 from pathlib import Path
 
@@ -358,19 +358,105 @@ def _get_ollama_url():
     except: return os.environ.get("OLLAMA_BASE_URL")
 
 def _get_ollama_model():
+    override = st.session_state.get("selected_model")
+    if override: return override
     try: return st.secrets.get("OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL","llama3.1")
     except: return os.environ.get("OLLAMA_MODEL","llama3.1")
 
-def query_ollama(prompt, system="", max_tokens=1000):
+@st.cache_data(ttl=30, show_spinner=False)
+def detect_ollama_models():
+    base_url = _get_ollama_url()
+    if not base_url: return []
+    try:
+        r = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=5)
+        if r.ok:
+            return sorted(m["name"] for m in r.json().get("models", []))
+    except Exception:
+        pass
+    return []
+
+@st.cache_data(ttl=15, show_spinner=False)
+def detect_gpu():
+    base_url = _get_ollama_url()
+    if not base_url: return None
+    try:
+        r = requests.get(f"{base_url.rstrip('/')}/api/ps", timeout=5)
+        if r.ok:
+            models = r.json().get("models", [])
+            if not models: return None
+            return any(m.get("size_vram", 0) > 0 for m in models)
+    except Exception:
+        pass
+    return None
+
+def _stream_ollama(prompt, system="", max_tokens=1000, temperature=0.70):
+    base_url = _get_ollama_url()
+    if not base_url:
+        yield "⚠️ OLLAMA_BASE_URL not set in Streamlit secrets."
+        return
+    try:
+        msgs = ([{"role":"system","content":system}] if system else []) + [{"role":"user","content":prompt}]
+        r = requests.post(f"{base_url.rstrip('/')}/api/chat",
+            json={"model":_get_ollama_model(),"messages":msgs,"stream":True,
+                  "options":{"num_predict":max_tokens,"temperature":temperature}},
+            timeout=120, stream=True)
+        if r.ok:
+            for line in r.iter_lines():
+                if line:
+                    try:
+                        chunk = json.loads(line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yield token
+                        if chunk.get("done"):
+                            break
+                    except Exception:
+                        pass
+        else:
+            yield f"⚠️ Ollama HTTP {r.status_code}: {r.text[:200]}"
+    except requests.Timeout:
+        yield "⚠️ **Timeout** — Ollama is still processing. Try a faster model (mistral or phi3:mini)."
+    except requests.ConnectionError:
+        yield "⚠️ **Cannot reach Ollama.** Check your tunnel URL and restart the Cloudflare tunnel."
+    except Exception as e:
+        yield f"⚠️ Error: {e}"
+
+def render_ai_output(prompt, system="", lore=True, max_tokens=800, temperature=0.70):
+    """Stream Ollama response with elapsed timer, then render styled output. Returns full text."""
+    start_t = time.perf_counter()
+    status = st.status("⚡ Generating analysis...", expanded=True)
+    full_text = ""
+    with status:
+        full_text = st.write_stream(_stream_ollama(prompt, system, max_tokens, temperature))
+        elapsed = time.perf_counter() - start_t
+        st.caption(f"Generated in {elapsed:.1f}s · Model: {_get_ollama_model()}")
+    status.update(label=f"✅ Done · {elapsed:.1f}s", state="complete", expanded=False)
+
+    if not full_text or full_text.startswith("⚠️"):
+        if full_text:
+            st.warning(full_text)
+        return None
+
+    if lore and "---" in full_text:
+        parts = full_text.split("---", 1)
+        st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="ai-output">{full_text}</div>', unsafe_allow_html=True)
+    return full_text
+
+# Keep non-streaming version for programmatic use (followup chat history)
+def query_ollama(prompt, system="", max_tokens=1000, temperature=0.70):
     base_url = _get_ollama_url()
     if not base_url: return None
     try:
         msgs = ([{"role":"system","content":system}] if system else []) + [{"role":"user","content":prompt}]
         r = requests.post(f"{base_url.rstrip('/')}/api/chat",
             json={"model":_get_ollama_model(),"messages":msgs,"stream":False,
-                  "options":{"num_predict":max_tokens}}, timeout=120)
+                  "options":{"num_predict":max_tokens,"temperature":temperature}}, timeout=120)
         return r.json().get("message",{}).get("content","").strip() if r.ok else None
-    except: return None
+    except Exception:
+        return None
 
 _ai_available = bool(_get_ollama_url())
 
@@ -596,18 +682,36 @@ def render_followup_chat(session_key, context, system_prompt):
     if user_q:
         if not _ai_available: _ai_warn(); return
         history.append({"role":"user","content":user_q})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(user_q)
         base_url = _get_ollama_url()
-        try:
-            msgs = [{"role":"system","content":system_prompt},
-                    {"role":"user","content":f"Context:\n{context}"}] + history
-            r = requests.post(f"{base_url.rstrip('/')}/api/chat",
-                json={"model":_get_ollama_model(),"messages":msgs,"stream":False,
-                      "options":{"num_predict":500}}, timeout=90)
-            ans = r.json().get("message",{}).get("content","").strip() if r.ok else "Error."
-        except Exception as e: ans = f"Error: {e}"
+        msgs = [{"role":"system","content":system_prompt},
+                {"role":"user","content":f"Context:\n{context}"}] + history
+        def _chat_stream():
+            try:
+                r = requests.post(f"{base_url.rstrip('/')}/api/chat",
+                    json={"model":_get_ollama_model(),"messages":msgs,"stream":True,
+                          "options":{"num_predict":500,"temperature":0.70}},
+                    timeout=90, stream=True)
+                if r.ok:
+                    for line in r.iter_lines():
+                        if line:
+                            try:
+                                chunk = json.loads(line)
+                                token = chunk.get("message",{}).get("content","")
+                                if token: yield token
+                                if chunk.get("done"): break
+                            except Exception: pass
+                else:
+                    yield f"⚠️ HTTP {r.status_code}"
+            except requests.Timeout:
+                yield "⚠️ Timeout — try a faster model."
+            except Exception as e:
+                yield f"⚠️ {e}"
+        with st.chat_message("assistant", avatar="🎮"):
+            ans = st.write_stream(_chat_stream())
         history.append({"role":"assistant","content":ans})
         st.session_state[hk] = history
-        st.rerun()
 
 def footer():
     st.markdown("""
@@ -662,9 +766,22 @@ with st.sidebar:
 
     st.markdown("---")
     if _ai_available:
-        st.markdown('<div style="background:#081a0f;border:1px solid #14532d;border-radius:10px;padding:10px 14px;color:#86efac;font-size:0.8rem">🟢 &nbsp;AI analysis online</div>', unsafe_allow_html=True)
+        available_models = detect_ollama_models()
+        if available_models:
+            gpu_status = detect_gpu()
+            gpu_label = "🟩 GPU" if gpu_status is True else "🟨 CPU" if gpu_status is False else ""
+            st.markdown(f'<div style="background:#081a0f;border:1px solid #14532d;border-radius:10px;padding:10px 14px;color:#86efac;font-size:0.8rem;margin-bottom:8px">🟢 &nbsp;AI online &nbsp;{gpu_label}</div>', unsafe_allow_html=True)
+            current_model = _get_ollama_model()
+            default_idx = available_models.index(current_model) if current_model in available_models else 0
+            chosen = st.selectbox("Model", available_models, index=default_idx,
+                                  label_visibility="collapsed",
+                                  help="Faster models: phi3:mini > mistral > llama3.1")
+            if chosen != st.session_state.get("selected_model"):
+                st.session_state["selected_model"] = chosen
+        else:
+            st.markdown('<div style="background:#081a0f;border:1px solid #14532d;border-radius:10px;padding:10px 14px;color:#86efac;font-size:0.8rem">🟢 &nbsp;AI analysis online</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div style="background:#12141a;border:1px solid #1e2d42;border-radius:10px;padding:10px 14px;color:#4b5a7a;font-size:0.8rem">🔵 &nbsp;Set OLLAMA_BASE_URL in secrets</div>', unsafe_allow_html=True)
+        st.markdown('<div style="background:#12141a;border:1px solid #1e2d42;border-radius:10px;padding:10px 14px;color:#4b5a7a;font-size:0.8rem">🔵 &nbsp;Set OLLAMA_BASE_URL in secrets to enable AI</div>', unsafe_allow_html=True)
     st.markdown("")
     st.caption("Data from OpenDota · No login needed")
 
@@ -792,16 +909,14 @@ with tab1:
                 st.plotly_chart(fig2, use_container_width=True)
 
         # AI
-        sec("AI Performance Analysis", "✨")
+        sec("AI PERFORMANCE ANALYSIS", "✨")
         if st.button("Generate AI Analysis", type="primary", key="ai_ov"):
             if not _ai_available: _ai_warn()
             elif recent:
                 ctx = f"Player: {name}\nWin rate: {wr:.1f}% ({wins}W/{losses}L)\nRecent form: {rwr:.0f}%\nAvg KDA: {avg_kda}\nAvg GPM: {avg_gpm}\nMost played: {', '.join(h for h,_ in top_heroes[:6])}"
-                with st.spinner("Analysing..."):
-                    result = query_ollama(ctx, system="You are an expert Dota 2 coach. Be specific and actionable. 4-6 sentences.", max_tokens=400)
-                if result:
-                    st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
-                else: st.error("Could not reach Ollama.")
+                render_ai_output(ctx,
+                    system="You are an expert Dota 2 coach. Be specific and actionable. 4-6 sentences.",
+                    lore=False, max_tokens=400)
 
     footer()
 
@@ -1051,23 +1166,15 @@ Required sections:
 5. Late Game (30min+) — game-ending plays, buybacks
 6. Critical Moments — 3-5 pivotal timestamps
 7. Key Lessons — 3 specific actionable takeaways"""
-                    with st.spinner("Generating analysis... (~30-60 seconds)"):
-                        result = query_ollama(
-                            f"Analyse this Dota 2 match from {perspective} perspective:{hf_section}\n\n{ctx}",
-                            system=system, max_tokens=1500)
+                    result = render_ai_output(
+                        f"Analyse this Dota 2 match from {perspective} perspective:{hf_section}\n\n{ctx}",
+                        system=system, max_tokens=1500)
                     if result:
-                        parts = result.split("---",1)
-                        if len(parts)==2:
-                            st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
-                        else:
-                            st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
                         st.session_state["dota_analysis"] = result
                         st.session_state["dota_ctx"] = ctx
                         report = f"# Dota 2 Match Analysis\nMatch: {mid} | Perspective: {perspective}\n\n{result}"
                         st.download_button("⬇️ Download analysis", report,
                             file_name=f"dota_analysis_{mid}.md", mime="text/markdown")
-                    else: st.error("Could not reach Ollama.")
 
             if st.session_state.get("dota_analysis"):
                 render_followup_chat("match", st.session_state.get("dota_ctx",""),
@@ -1219,22 +1326,11 @@ with tab4:
             if st.button("Generate Hero Analysis", type="primary", key="ai_heroes"):
                 if not _ai_available: _ai_warn()
                 else:
-                    with st.spinner("Analysing..."):
-                        ctx = build_heroes_context(ph_data, hero_map, rankings)
-                        prompt = f"""Player hero pool:\n{ctx}\n\nProvide:
-1. What playstyle does this hero pool reveal (support, carry, initiator, etc.)?
-2. Which 2-3 heroes should they focus on to climb rank?
-3. Any major gaps in their pool (no reliable carry, no disable)?
-Start with a 2-sentence Dota lore narrative about the player's signature hero, then ---."""
-                        result = query_ollama(prompt, system="You are a Dota 2 expert coach. Be specific and actionable.", max_tokens=800)
-                        if result:
-                            parts = result.split("---", 1)
-                            if len(parts) == 2:
-                                st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
-                                st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
-                            else:
-                                st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
-                        else: st.error("Could not reach Ollama.")
+                    ctx = build_heroes_context(ph_data, hero_map, rankings)
+                    render_ai_output(
+                        f"Player hero pool:\n{ctx}\n\nProvide:\n1. What playstyle does this hero pool reveal (support, carry, initiator, etc.)?\n2. Which 2-3 heroes should they focus on to climb rank?\n3. Any major gaps in their pool (no reliable carry, no disable)?\nStart with a 2-sentence Dota lore narrative about the player's signature hero, then ---.",
+                        system="You are a Dota 2 expert coach. Be specific and actionable.",
+                        max_tokens=800)
     footer()
 
 
@@ -1331,22 +1427,11 @@ with tab5:
             if st.button("Analyse Teammates", type="primary", key="ai_peers"):
                 if not _ai_available: _ai_warn()
                 else:
-                    with st.spinner("Analysing..."):
-                        ctx = build_peers_context(peers_data)
-                        prompt = f"""Teammate data:\n{ctx}\n\nAnalyse:
-1. Who are the top 2-3 players to queue with and why?
-2. Which players are hurting win rate?
-3. Any patterns — winning with certain player types (supports, carries)?
-Start with a 2-sentence Dota lore narrative about allies and teamwork then ---."""
-                        result = query_ollama(prompt, system="You are a Dota 2 expert. Short, direct, actionable.", max_tokens=600)
-                        if result:
-                            parts = result.split("---", 1)
-                            if len(parts) == 2:
-                                st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
-                                st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
-                            else:
-                                st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
-                        else: st.error("Could not reach Ollama.")
+                    ctx = build_peers_context(peers_data)
+                    render_ai_output(
+                        f"Teammate data:\n{ctx}\n\nAnalyse:\n1. Who are the top 2-3 players to queue with and why?\n2. Which players are hurting win rate?\n3. Any patterns — winning with certain player types (supports, carries)?\nStart with a 2-sentence Dota lore narrative about allies and teamwork then ---.",
+                        system="You are a Dota 2 expert. Short, direct, actionable.",
+                        max_tokens=600)
     footer()
 
 
@@ -1485,22 +1570,11 @@ with tab6:
         if st.button("Analyse Performance Trends", type="primary", key="ai_trends"):
             if not _ai_available: _ai_warn()
             else:
-                with st.spinner("Analysing..."):
-                    ctx = build_totals_context(totals_data, matches_300)
-                    prompt = f"""Performance data:\n{ctx}\n\nAnalyse:
-1. What habit or timing pattern stands out most (peak hours, day patterns)?
-2. Are there tilt indicators (long loss streaks, late-night losing)?
-3. One specific, actionable improvement to raise win rate.
-Start with a 2-sentence Dota lore narrative about perseverance then ---."""
-                    result = query_ollama(prompt, system="You are a Dota 2 performance coach. Be specific and direct.", max_tokens=600)
-                    if result:
-                        parts = result.split("---", 1)
-                        if len(parts) == 2:
-                            st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
-                        else:
-                            st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
-                    else: st.error("Could not reach Ollama.")
+                ctx = build_totals_context(totals_data, matches_300)
+                render_ai_output(
+                    f"Performance data:\n{ctx}\n\nAnalyse:\n1. What habit or timing pattern stands out most (peak hours, day patterns)?\n2. Are there tilt indicators (long loss streaks, late-night losing)?\n3. One specific, actionable improvement to raise win rate.\nStart with a 2-sentence Dota lore narrative about perseverance then ---.",
+                    system="You are a Dota 2 performance coach. Be specific and direct.",
+                    max_tokens=600)
     footer()
 
 
@@ -1598,22 +1672,11 @@ with tab7:
         if st.button("Analyse Behavior", type="primary", key="ai_behavior"):
             if not _ai_available: _ai_warn()
             else:
-                with st.spinner("Analysing..."):
-                    ctx = build_behavior_context(wordcloud_data, wardmap_data)
-                    prompt = f"""Player behavior data:\n{ctx}\n\nAnalyse:
-1. What does the chat behavior reveal (toxic, friendly, shot-caller, silent)?
-2. What does the ward placement ratio say about support quality and vision game?
-3. One specific change that would most improve their win rate from a behavioral standpoint.
-Start with a 2-sentence Dota lore narrative about vision and control of the map then ---."""
-                    result = query_ollama(prompt, system="You are a Dota 2 behavioral analyst. Be direct and insightful.", max_tokens=600)
-                    if result:
-                        parts = result.split("---", 1)
-                        if len(parts) == 2:
-                            st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
-                            st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
-                        else:
-                            st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
-                    else: st.error("Could not reach Ollama.")
+                ctx = build_behavior_context(wordcloud_data, wardmap_data)
+                render_ai_output(
+                    f"Player behavior data:\n{ctx}\n\nAnalyse:\n1. What does the chat behavior reveal (toxic, friendly, shot-caller, silent)?\n2. What does the ward placement ratio say about support quality and vision game?\n3. One specific change that would most improve their win rate from a behavioral standpoint.\nStart with a 2-sentence Dota lore narrative about vision and control of the map then ---.",
+                    system="You are a Dota 2 behavioral analyst. Be direct and insightful.",
+                    max_tokens=600)
     footer()
 
 
@@ -1694,14 +1757,12 @@ For each team provide:
 - Lane assignment recommendations
 
 Be specific about the heroes picked."""
-            with st.spinner("Analysing draft... (~20-40 seconds)"):
-                result = query_ollama(f"Analyse this Dota 2 draft:\n\n{draft_ctx}", system=system, max_tokens=900)
+            result = render_ai_output(f"Analyse this Dota 2 draft:\n\n{draft_ctx}", system=system, max_tokens=900)
             if result:
                 st.session_state["dota_draft_rec"] = result
                 st.session_state["dota_draft_ctx"] = draft_ctx
-            else: st.error("Could not reach Ollama.")
 
-    if st.session_state.get("dota_draft_rec"):
+    if st.session_state.get("dota_draft_rec") and not get_strat:
         st.markdown("")
         result = st.session_state["dota_draft_rec"]
         parts = result.split("---",1)
@@ -1711,7 +1772,6 @@ Be specific about the heroes picked."""
         else:
             analysis = result
 
-        # Try to split Radiant/Dire sections
         cr2, cd2 = st.columns(2)
         mid_idx = -1
         for marker in ["**Dire","## Dire","### Dire","Dire:"]:
@@ -1727,10 +1787,11 @@ Be specific about the heroes picked."""
         else:
             st.markdown(f'<div class="ai-output">{analysis}</div>', unsafe_allow_html=True)
 
+    if st.session_state.get("dota_draft_rec"):
+        result = st.session_state["dota_draft_rec"]
         report = f"# Dota 2 Draft Analysis\nRadiant: {', '.join(active_r)}\nDire: {', '.join(active_d)}\n\n{result}"
         st.download_button("⬇️ Download draft analysis", report,
             file_name="dota_draft_analysis.md", mime="text/markdown")
-
         render_followup_chat("draft", st.session_state.get("dota_draft_ctx",""),
             "You are an expert Dota 2 draft analyst. Answer follow-up questions about this specific draft — counter picks, item builds, lane assignments, timing windows.")
 

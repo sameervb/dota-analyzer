@@ -839,6 +839,7 @@ with st.sidebar:
             elif "deepseek" in n: hint = "🔬 reasoning · slow"
             elif "code" in n: hint = "💻 code · ~20s"
             elif any(x in n for x in ["neural","orca","chat"]): hint = "💬 chat · ~20s"
+            elif any(x in n for x in ["mistral","llama","gemma","qwen","phi"]): hint = "⚖️ balanced · ~20s"
             else: hint = "🤖 ~20s"
             return f"{m} — {hint}"
         available_models = detect_ollama_models()

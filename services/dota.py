@@ -193,6 +193,138 @@ def search_opendota_players(query):
     return results if isinstance(results, list) else []
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_player_heroes(account_id):
+    return fetch_opendota_json(f"players/{account_id}/heroes") or []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_peers(account_id):
+    return fetch_opendota_json(f"players/{account_id}/peers") or []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_totals(account_id):
+    return fetch_opendota_json(f"players/{account_id}/totals") or []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_wardmap(account_id):
+    return fetch_opendota_json(f"players/{account_id}/wardmap") or {}
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_wordcloud(account_id):
+    return fetch_opendota_json(f"players/{account_id}/wordcloud") or {}
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_rankings(account_id):
+    return fetch_opendota_json(f"players/{account_id}/rankings") or []
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def get_opendota_matches(account_id, limit=300):
+    return fetch_opendota_json(f"players/{account_id}/matches", params={"limit": limit}) or []
+
+
+def build_heroes_context(hero_data_list, hero_map, rankings):
+    if not hero_data_list:
+        return "No hero data available."
+    ranking_map = {r.get("hero_id"): r.get("rank") for r in rankings}
+    lines = []
+    for h in sorted(hero_data_list, key=lambda x: -x.get("games", 0))[:20]:
+        hid = h.get("hero_id")
+        name = get_hero_name(hero_map, hid)
+        g = h.get("games", 0)
+        w = h.get("win", 0)
+        wr = w / g * 100 if g > 0 else 0
+        rank = ranking_map.get(hid)
+        rank_str = f", global rank #{rank}" if rank else ""
+        lines.append(f"{name}: {g} games, {wr:.0f}% WR{rank_str}")
+    return "Hero performance (top 20 by games):\n" + "\n".join(lines)
+
+
+def build_peers_context(peers_data):
+    if not peers_data:
+        return "No peer data available."
+    lines = []
+    for p in sorted(peers_data, key=lambda x: -x.get("with_games", 0))[:15]:
+        name = p.get("personaname") or f"Player {p.get('account_id')}"
+        wg = p.get("with_games", 0)
+        ww = p.get("with_win", 0)
+        wwr = ww / wg * 100 if wg > 0 else 0
+        ag = p.get("against_games", 0)
+        aw = p.get("against_win", 0)
+        awr = aw / ag * 100 if ag > 0 else 0
+        lines.append(f"{name}: {wg} games together ({wwr:.0f}% WR), {ag} games against ({awr:.0f}% WR for player against them)")
+    return "Most played with:\n" + "\n".join(lines)
+
+
+def build_totals_context(totals_data, matches_data):
+    from collections import Counter
+    parts = []
+    key_fields = ["kills", "deaths", "assists", "gold_per_min", "xp_per_min", "last_hits", "hero_damage"]
+    for row in totals_data:
+        field = row.get("field")
+        n = row.get("n", 0)
+        s = row.get("sum", 0)
+        if field in key_fields and n > 0:
+            parts.append(f"Avg {field}: {s/n:.1f} over {n} games")
+    if matches_data:
+        day_counts = Counter()
+        hour_counts = Counter()
+        for m in matches_data:
+            st_time = m.get("start_time")
+            if st_time:
+                d = datetime.fromtimestamp(st_time)
+                day_counts[d.strftime("%A")] += 1
+                hour_counts[d.hour] += 1
+        if day_counts:
+            most_active_day = max(day_counts, key=day_counts.get)
+            parts.append(f"Most active day: {most_active_day} ({day_counts[most_active_day]} games)")
+        if hour_counts:
+            peak_hour = max(hour_counts, key=hour_counts.get)
+            parts.append(f"Peak gaming hour: {peak_hour}:00 ({hour_counts[peak_hour]} games)")
+        results = []
+        for m in matches_data:
+            slot = m.get("player_slot", 0)
+            rw = m.get("radiant_win")
+            won = (slot < 128 and rw) or (slot >= 128 and not rw)
+            results.append(won)
+        if results:
+            wr_300 = sum(results) / len(results) * 100
+            parts.append(f"Win rate last {len(results)} games: {wr_300:.1f}%")
+    return "\n".join(parts) if parts else "No totals data."
+
+
+def build_behavior_context(wordcloud_data, wardmap_data):
+    parts = []
+    my_words = wordcloud_data.get("my_word_counts") or {}
+    if my_words:
+        top_words = sorted(my_words.items(), key=lambda x: -x[1])[:20]
+        parts.append("Top chat words: " + ", ".join(f"{w}({c})" for w, c in top_words))
+        total_words = sum(my_words.values())
+        parts.append(f"Total chat messages: {total_words}")
+    obs = wardmap_data.get("obs") or {}
+    sen = wardmap_data.get("sen") or {}
+
+    def count_wards(d):
+        total = 0
+        for xv in d.values():
+            if isinstance(xv, dict):
+                total += sum(int(v) for v in xv.values() if str(v).isdigit())
+        return total
+
+    obs_count = count_wards(obs)
+    sen_count = count_wards(sen)
+    if obs_count or sen_count:
+        parts.append(f"Observer wards placed: {obs_count}, Sentry wards: {sen_count}")
+        if obs_count > 0:
+            parts.append(f"Sentry:Observer ratio: {sen_count/obs_count:.2f}")
+    return "\n".join(parts) if parts else "No behavior data."
+
+
 def build_dota_match_context(match_data, hero_map):
     if not match_data:
         return "No match data available."

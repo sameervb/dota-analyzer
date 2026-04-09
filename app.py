@@ -20,6 +20,12 @@ from services.dota import (
     get_opendota_win_loss, get_opendota_match,
     search_opendota_players, build_dota_match_context,
     generate_random_draft, get_hero_name, get_hero_image,
+    get_opendota_player_heroes, get_opendota_peers,
+    get_opendota_totals, get_opendota_wardmap,
+    get_opendota_wordcloud, get_opendota_rankings,
+    get_opendota_matches,
+    build_heroes_context, build_peers_context,
+    build_totals_context, build_behavior_context,
 )
 
 st.set_page_config(page_title="Dota 2 Analyzer", page_icon="🎮", layout="wide",
@@ -313,6 +319,34 @@ st.markdown(f"""
 [data-testid="stTextInput"] input {{
     background: #0d1520 !important; border-color: #1a2840 !important;
     color: #cbd5e1 !important; border-radius: 10px !important;
+}}
+
+/* ── Peer cards ── */
+.peer-card {{
+    background: linear-gradient(135deg,#0d1520,#111d2e);
+    border: 1px solid #1a2840; border-radius:14px;
+    padding:14px 18px; margin-bottom:8px;
+    display:grid; grid-template-columns:44px 1fr auto auto auto;
+    align-items:center; gap:16px;
+    transition: border-color 0.2s;
+}}
+.peer-card:hover {{ border-color:#2a3d5a; }}
+
+/* ── Record / stat cards ── */
+.record-card {{
+    background: linear-gradient(135deg,#0d1520,#111d2e);
+    border:1px solid #1a2840; border-radius:14px;
+    padding:16px 20px; text-align:center;
+}}
+.record-val {{
+    font-size:1.8rem; font-weight:900; line-height:1.1;
+}}
+.record-lbl {{
+    font-size:0.68rem; text-transform:uppercase;
+    letter-spacing:0.1em; color:#4b5a7a; margin-top:4px;
+}}
+.record-hero {{
+    font-size:0.78rem; color:#64748b; margin-top:6px;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -642,8 +676,10 @@ with st.spinner("Loading hero data..."):
     hero_stats = get_opendota_hero_stats()
 hero_names_sorted = sorted([h["name"] for h in hero_map.values() if h.get("name")], key=str.lower)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Overview", "🕹️ Match History", "🔍 Match Analyzer", "⚔️ Draft Simulator", "ℹ️ About"
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    "📊 Overview", "🕹️ Match History", "🔍 Match Analyzer",
+    "🦸 Heroes", "👥 Peers", "📈 Trends", "🗺️ Behavior",
+    "⚔️ Draft Simulator", "ℹ️ About"
 ])
 
 
@@ -1041,9 +1077,550 @@ Required sections:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — Draft Simulator
+# TAB 4 — Heroes
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
+    banner(heroes_bg, "Hero Pool", "Full hero stats · global rankings · playstyle analysis", height=160)
+
+    if not account_id:
+        st.info("Load a player in the sidebar to see hero stats.")
+    else:
+        with st.spinner("Loading hero pool..."):
+            ph_data = get_opendota_player_heroes(account_id)
+            rankings = get_opendota_rankings(account_id)
+
+        if not ph_data:
+            st.warning("No hero data available for this player.")
+        else:
+            ranking_map = {r.get("hero_id"): r for r in rankings}
+            sorted_heroes = sorted(ph_data, key=lambda x: -x.get("games", 0))
+            total_h = len([h for h in ph_data if h.get("games", 0) > 0])
+            best_wr_heroes = [h for h in ph_data if h.get("games", 0) >= 5]
+            best_h = max(best_wr_heroes, key=lambda x: x.get("win", 0) / x.get("games", 1)) if best_wr_heroes else {}
+            best_h_name = get_hero_name(hero_map, best_h.get("hero_id")) if best_h else "—"
+            best_h_wr = best_h.get("win", 0) / best_h.get("games", 1) * 100 if best_h else 0
+            most_played = sorted_heroes[0] if sorted_heroes else {}
+            mp_name = get_hero_name(hero_map, most_played.get("hero_id")) if most_played else "—"
+            mp_games = most_played.get("games", 0)
+
+            hkc1, hkc2, hkc3, hkc4 = st.columns(4)
+            with hkc1: kpi("🦸", "Heroes Played", str(total_h), f"Of {len(ph_data)} total", "#8b5cf6")
+            with hkc2: kpi("🏆", "Most Played", mp_name, f"{mp_games} games", "#c84b31")
+            with hkc3: kpi("⭐", "Best WR (5+ games)", best_h_name, f"{best_h_wr:.0f}%", "#22c55e")
+            with hkc4:
+                ranked_count = len([h for h in ph_data if h.get("hero_id") in ranking_map])
+                kpi("🌍", "Global Rankings", str(ranked_count), "heroes ranked", "#f59e0b")
+
+            sec("HERO PERFORMANCE", "🦸")
+            hero_html = ""
+            for h in sorted_heroes[:30]:
+                hid = h.get("hero_id")
+                hname = get_hero_name(hero_map, hid)
+                icon_url = get_hero_image(hero_map, hid, "icon")
+                g = h.get("games", 0)
+                if g == 0: continue
+                w = h.get("win", 0)
+                wr = w / g * 100
+                wr_color = "#22c55e" if wr >= 55 else "#f59e0b" if wr >= 45 else "#ef4444"
+                wr_class = "good" if wr >= 55 else "mid" if wr >= 45 else "bad"
+                rank_data = ranking_map.get(hid)
+                rank_html = f'<span style="font-size:0.68rem;color:#8b5cf6;margin-left:8px">#{rank_data.get("rank","?")}</span>' if rank_data else ""
+                img_html = f'<img src="{icon_url}" width="32" height="32" style="border-radius:6px">' if icon_url else '<div style="width:32px;height:32px;background:#1a2840;border-radius:6px"></div>'
+                last_ts = h.get("last_played")
+                last_str = datetime.fromtimestamp(last_ts).strftime("%d %b") if last_ts else ""
+                hero_html += f"""
+                <div class="hero-breakdown-card">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        {img_html}
+                        <div>
+                            <div class="hb-hero">{hname}{rank_html}</div>
+                            <div style="font-size:0.68rem;color:#334155">{last_str}</div>
+                        </div>
+                    </div>
+                    <div class="hb-games">{g} games</div>
+                    <div class="hb-wr {wr_class}">{wr:.0f}%</div>
+                    <div>
+                        <div class="hb-bar-wrap">
+                            <div class="hb-bar-fill" style="width:{wr}%;background:{wr_color}"></div>
+                        </div>
+                    </div>
+                </div>"""
+            st.markdown(hero_html, unsafe_allow_html=True)
+
+            sec("ROLE DISTRIBUTION & WIN RATE SPREAD", "📊")
+            role_counts = {}
+            for h in ph_data:
+                hid = h.get("hero_id")
+                g = h.get("games", 0)
+                if g == 0: continue
+                hero_info = hero_map.get(hid, {})
+                for hs in hero_stats:
+                    if (hs.get("localized_name") or hs.get("name")) == hero_info.get("name"):
+                        for role in hs.get("roles", []):
+                            role_counts[role] = role_counts.get(role, 0) + g
+                        break
+
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                if role_counts:
+                    fig_role = go.Figure(data=[go.Pie(
+                        labels=list(role_counts.keys()),
+                        values=list(role_counts.values()),
+                        hole=0.5,
+                        marker_colors=["#c84b31","#8b5cf6","#22c55e","#f59e0b","#60a5fa","#ec4899","#14b8a6","#f97316"],
+                        textfont=dict(color="#94a3b8"),
+                    )])
+                    fig_role.update_layout(
+                        paper_bgcolor="#0d1520", font_color="#64748b", height=260,
+                        margin=dict(l=0,r=0,t=24,b=0),
+                        legend=dict(font=dict(color="#64748b",size=10)),
+                        title=dict(text="Roles Played (by games)", font=dict(color="#64748b",size=12)),
+                    )
+                    st.plotly_chart(fig_role, use_container_width=True)
+            with rc2:
+                played_5plus = [h for h in ph_data if h.get("games", 0) >= 5]
+                if played_5plus:
+                    hero_wrs = [h.get("win", 0) / h.get("games", 1) * 100 for h in played_5plus]
+                    fig_dist = go.Figure()
+                    fig_dist.add_trace(go.Histogram(x=hero_wrs, nbinsx=10,
+                        marker_color="#c84b31", opacity=0.8))
+                    fig_dist.add_vline(x=50, line_dash="dot", line_color="#4b5a7a")
+                    fig_dist.update_layout(
+                        title=dict(text="Win Rate Distribution (5+ games)", font=dict(color="#64748b",size=12)),
+                        paper_bgcolor="#0d1520", plot_bgcolor="#0d1520", font_color="#64748b",
+                        height=260, margin=dict(l=8,r=8,t=36,b=8),
+                        xaxis=dict(gridcolor="#0f1e30", title="Win Rate %", tickfont=dict(size=9)),
+                        yaxis=dict(gridcolor="#0f1e30", title="Heroes", tickfont=dict(size=9)),
+                    )
+                    st.plotly_chart(fig_dist, use_container_width=True)
+
+            if rankings:
+                sec("GLOBAL RANKINGS (Top Heroes)", "🌍")
+                rank_html = ""
+                for r in sorted(rankings, key=lambda x: x.get("rank", 999999))[:10]:
+                    hid = r.get("hero_id")
+                    hname = get_hero_name(hero_map, hid)
+                    icon_url = get_hero_image(hero_map, hid, "icon")
+                    rank = r.get("rank", "?")
+                    score = r.get("score", 0)
+                    img_html = f'<img src="{icon_url}" width="28" height="28" style="border-radius:5px">' if icon_url else ""
+                    rank_html += f"""
+                    <div style="background:linear-gradient(135deg,#0d1520,#111d2e);border:1px solid #1a2840;
+                                border-radius:12px;padding:12px 16px;margin-bottom:8px;
+                                display:flex;align-items:center;gap:16px">
+                        <div style="font-size:1.2rem;font-weight:900;color:#8b5cf6;min-width:52px">#{rank}</div>
+                        {img_html}
+                        <div style="flex:1;font-weight:700;color:#e2e8f0">{hname}</div>
+                        <div style="font-size:0.8rem;color:#64748b">Score {score:.0f}</div>
+                    </div>"""
+                st.markdown(rank_html, unsafe_allow_html=True)
+
+            sec("AI HERO ANALYSIS", "🤖")
+            if st.button("Generate Hero Analysis", type="primary", key="ai_heroes"):
+                if not _ai_available: _ai_warn()
+                else:
+                    with st.spinner("Analysing..."):
+                        ctx = build_heroes_context(ph_data, hero_map, rankings)
+                        prompt = f"""Player hero pool:\n{ctx}\n\nProvide:
+1. What playstyle does this hero pool reveal (support, carry, initiator, etc.)?
+2. Which 2-3 heroes should they focus on to climb rank?
+3. Any major gaps in their pool (no reliable carry, no disable)?
+Start with a 2-sentence Dota lore narrative about the player's signature hero, then ---."""
+                        result = query_ollama(prompt, system="You are a Dota 2 expert coach. Be specific and actionable.", max_tokens=800)
+                        if result:
+                            parts = result.split("---", 1)
+                            if len(parts) == 2:
+                                st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
+                                st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
+                            else:
+                                st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
+                        else: st.error("Could not reach Ollama.")
+    footer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — Peers
+# ══════════════════════════════════════════════════════════════════════════════
+with tab5:
+    banner(cover_bg, "Teammates & Peers", "Most played with · win rate synergy · queue recommendations", height=160)
+
+    if not account_id:
+        st.info("Load a player in the sidebar to see peer data.")
+    else:
+        with st.spinner("Loading peer data..."):
+            peers_data = get_opendota_peers(account_id)
+
+        valid_peers = [p for p in peers_data if p.get("with_games", 0) >= 3]
+        valid_peers.sort(key=lambda x: -x.get("with_games", 0))
+
+        if not valid_peers:
+            st.warning("Not enough peer data. Need 3+ games with the same player.")
+        else:
+            best_peer = max(valid_peers, key=lambda p: p.get("with_win", 0) / max(p.get("with_games", 1), 1))
+            worst_peer = min(valid_peers, key=lambda p: p.get("with_win", 0) / max(p.get("with_games", 1), 1)) if len(valid_peers) > 1 else {}
+
+            pkc1, pkc2, pkc3 = st.columns(3)
+            with pkc1:
+                kpi("👥", "Regular Teammates", str(len(valid_peers)), "3+ games together", "#8b5cf6")
+            with pkc2:
+                if best_peer:
+                    bname = (best_peer.get("personaname") or f"Player {best_peer.get('account_id','?')}")[:16]
+                    bwr = best_peer.get("with_win", 0) / max(best_peer.get("with_games", 1), 1) * 100
+                    kpi("🤝", "Best Partner", bname, f"{bwr:.0f}% WR together", "#22c55e")
+            with pkc3:
+                if worst_peer:
+                    wname = (worst_peer.get("personaname") or f"Player {worst_peer.get('account_id','?')}")[:16]
+                    wwr = worst_peer.get("with_win", 0) / max(worst_peer.get("with_games", 1), 1) * 100
+                    kpi("💀", "Worst Partner", wname, f"{wwr:.0f}% WR together", "#ef4444")
+
+            sec("MOST PLAYED WITH", "🎮")
+            peer_html = ""
+            for p in valid_peers[:20]:
+                name = p.get("personaname") or f"Player {p.get('account_id', '?')}"
+                avatar = p.get("avatar")
+                wg = p.get("with_games", 0)
+                ww = p.get("with_win", 0)
+                wwr = ww / wg * 100 if wg > 0 else 0
+                ag = p.get("against_games", 0)
+                wr_color = "#22c55e" if wwr >= 55 else "#f59e0b" if wwr >= 45 else "#ef4444"
+                avatar_html = f'<img src="{avatar}" width="36" height="36" style="border-radius:8px;border:1px solid #1a2840">' if avatar else '<div style="width:36px;height:36px;background:#1a2840;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem">👤</div>'
+                peer_html += f"""
+                <div style="background:linear-gradient(135deg,#0d1520,#111d2e);border:1px solid #1a2840;
+                            border-left:4px solid {wr_color};border-radius:14px;padding:14px 18px;margin-bottom:8px;
+                            display:grid;grid-template-columns:44px 1fr auto auto auto;align-items:center;gap:16px">
+                    {avatar_html}
+                    <div>
+                        <div style="font-weight:700;color:#e2e8f0;font-size:0.9rem">{name}</div>
+                        <div style="font-size:0.72rem;color:#4b5a7a">{wg} games together · {ag} against</div>
+                    </div>
+                    <div style="text-align:center">
+                        <div style="font-size:1.1rem;font-weight:800;color:{wr_color}">{wwr:.0f}%</div>
+                        <div style="font-size:0.62rem;color:#4b5a7a;text-transform:uppercase">With WR</div>
+                    </div>
+                    <div style="text-align:center">
+                        <div style="font-size:0.95rem;font-weight:700;color:#94a3b8">{ww}/{wg - ww}</div>
+                        <div style="font-size:0.62rem;color:#4b5a7a;text-transform:uppercase">W / L</div>
+                    </div>
+                    <div style="width:80px">
+                        <div style="background:#1a2840;border-radius:20px;height:6px;overflow:hidden">
+                            <div style="width:{min(wwr,100):.0f}%;height:100%;background:{wr_color};border-radius:20px"></div>
+                        </div>
+                    </div>
+                </div>"""
+            st.markdown(peer_html, unsafe_allow_html=True)
+
+            if len(valid_peers) >= 3:
+                sec("WIN RATE BY TEAMMATE", "📊")
+                top_p = valid_peers[:15]
+                p_names = [(p.get("personaname") or f"P{p.get('account_id','?')}")[:12] for p in top_p]
+                p_wrs = [p.get("with_win", 0) / max(p.get("with_games", 1), 1) * 100 for p in top_p]
+                bar_colors = ["#22c55e" if w >= 55 else "#f59e0b" if w >= 45 else "#ef4444" for w in p_wrs]
+                fig_peers = go.Figure(go.Bar(x=p_names, y=p_wrs, marker_color=bar_colors,
+                    text=[f"{w:.0f}%" for w in p_wrs], textposition="outside",
+                    textfont=dict(color="#94a3b8", size=9)))
+                fig_peers.add_hline(y=50, line_dash="dot", line_color="#1e2d42")
+                fig_peers.update_layout(
+                    paper_bgcolor="#0d1520", plot_bgcolor="#0d1520", font_color="#64748b",
+                    height=260, margin=dict(l=8,r=8,t=20,b=8),
+                    xaxis=dict(gridcolor="#0f1e30", tickfont=dict(size=9)),
+                    yaxis=dict(gridcolor="#0f1e30", range=[0,110], title="Win Rate %", tickfont=dict(size=9)),
+                    showlegend=False)
+                st.plotly_chart(fig_peers, use_container_width=True)
+
+            sec("AI TEAMMATE ANALYSIS", "🤖")
+            if st.button("Analyse Teammates", type="primary", key="ai_peers"):
+                if not _ai_available: _ai_warn()
+                else:
+                    with st.spinner("Analysing..."):
+                        ctx = build_peers_context(peers_data)
+                        prompt = f"""Teammate data:\n{ctx}\n\nAnalyse:
+1. Who are the top 2-3 players to queue with and why?
+2. Which players are hurting win rate?
+3. Any patterns — winning with certain player types (supports, carries)?
+Start with a 2-sentence Dota lore narrative about allies and teamwork then ---."""
+                        result = query_ollama(prompt, system="You are a Dota 2 expert. Short, direct, actionable.", max_tokens=600)
+                        if result:
+                            parts = result.split("---", 1)
+                            if len(parts) == 2:
+                                st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
+                                st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
+                            else:
+                                st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
+                        else: st.error("Could not reach Ollama.")
+    footer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — Trends & Records
+# ══════════════════════════════════════════════════════════════════════════════
+with tab6:
+    banner(heroes_bg, "Trends & Records",
+           "Activity by day & hour · stat totals · win/loss streaks · performance patterns", height=160)
+
+    if not account_id:
+        st.info("Load a player in the sidebar to see trends.")
+    else:
+        with st.spinner("Loading trends data..."):
+            totals_data = get_opendota_totals(account_id)
+            matches_300 = get_opendota_matches(account_id, limit=300)
+
+        if matches_300:
+            from collections import Counter
+            dow_counts = Counter()
+            dow_wins = Counter()
+            hour_counts = Counter()
+            for m in matches_300:
+                st_time = m.get("start_time")
+                if not st_time: continue
+                d = datetime.fromtimestamp(st_time)
+                dow = d.strftime("%a")
+                dow_counts[dow] += 1
+                hour_counts[d.hour] += 1
+                slot = m.get("player_slot", 0)
+                rw = m.get("radiant_win")
+                won = (slot < 128 and rw) or (slot >= 128 and not rw)
+                if won: dow_wins[dow] += 1
+
+            dows = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+            dow_g = [dow_counts.get(d, 0) for d in dows]
+            dow_wr = [dow_wins.get(d, 0) / max(dow_counts.get(d, 1), 1) * 100 for d in dows]
+
+            sec("ACTIVITY PATTERNS", "📅")
+            col_cal1, col_cal2 = st.columns(2)
+            with col_cal1:
+                fig_dow = go.Figure()
+                fig_dow.add_trace(go.Bar(name="Games", x=dows, y=dow_g,
+                    marker_color="#c84b31", opacity=0.75, yaxis="y"))
+                fig_dow.add_trace(go.Scatter(name="Win %", x=dows, y=dow_wr,
+                    mode="lines+markers", line=dict(color="#22c55e", width=2.5),
+                    marker=dict(size=8), yaxis="y2"))
+                fig_dow.add_hline(y=50, line_dash="dot", line_color="#1e2d42", yref="y2")
+                fig_dow.update_layout(
+                    title=dict(text="Games & Win Rate by Day", font=dict(color="#64748b",size=12)),
+                    paper_bgcolor="#0d1520", plot_bgcolor="#0d1520", font_color="#64748b",
+                    height=260, margin=dict(l=8,r=8,t=36,b=8),
+                    xaxis=dict(gridcolor="#0f1e30", tickfont=dict(size=9)),
+                    yaxis=dict(gridcolor="#0f1e30", title="Games", tickfont=dict(size=9)),
+                    yaxis2=dict(range=[0,100], title="Win %", tickfont=dict(size=9), side="right", overlaying="y"),
+                    legend=dict(font=dict(color="#64748b",size=10)),
+                )
+                st.plotly_chart(fig_dow, use_container_width=True)
+            with col_cal2:
+                hours = list(range(24))
+                h_counts = [hour_counts.get(h, 0) for h in hours]
+                fig_hour = go.Figure(go.Bar(x=hours, y=h_counts,
+                    marker_color=["#c84b31" if (h >= 20 or h <= 3) else "#8b5cf6" if (14 <= h <= 19) else "#1e3d5a" for h in hours],
+                    hovertemplate="Hour %{x}:00 — %{y} games<extra></extra>"))
+                fig_hour.update_layout(
+                    title=dict(text="Games by Hour (Local Time)", font=dict(color="#64748b",size=12)),
+                    paper_bgcolor="#0d1520", plot_bgcolor="#0d1520", font_color="#64748b",
+                    height=260, margin=dict(l=8,r=8,t=36,b=8),
+                    xaxis=dict(gridcolor="#0f1e30", title="Hour", tickvals=list(range(0,24,3)), tickfont=dict(size=9)),
+                    yaxis=dict(gridcolor="#0f1e30", title="Games", tickfont=dict(size=9)),
+                )
+                st.plotly_chart(fig_hour, use_container_width=True)
+
+            sec("WIN / LOSS STREAKS", "🔥")
+            results_300 = []
+            for m in matches_300:
+                slot = m.get("player_slot", 0)
+                rw = m.get("radiant_win")
+                won = (slot < 128 and rw) or (slot >= 128 and not rw)
+                results_300.append(won)
+            max_win = max_loss = cur_win = cur_loss = 0
+            for r in results_300:
+                if r:
+                    cur_win += 1; cur_loss = 0; max_win = max(max_win, cur_win)
+                else:
+                    cur_loss += 1; cur_win = 0; max_loss = max(max_loss, cur_loss)
+
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1: kpi("🔥", "Best Win Streak", str(max_win), "consecutive wins", "#22c55e")
+            with sc2: kpi("💀", "Worst Loss Streak", str(max_loss), "consecutive losses", "#ef4444")
+            with sc3:
+                r10 = results_300[:10]
+                kpi("📊", "Last 10 Games", f"{sum(r10)}W-{10-sum(r10)}L", "recent form",
+                    "#22c55e" if sum(r10) >= 6 else "#ef4444")
+            with sc4:
+                wr_300 = sum(results_300) / len(results_300) * 100 if results_300 else 0
+                kpi("🎯", f"Last {len(results_300)} Win Rate", f"{wr_300:.1f}%",
+                    f"{sum(results_300)}W {len(results_300)-sum(results_300)}L", "#c84b31")
+
+        if totals_data:
+            sec("STAT TOTALS", "📊")
+            display_fields = {
+                "kills": ("⚔️", "Total Kills", "#ef4444"),
+                "deaths": ("💀", "Total Deaths", "#94a3b8"),
+                "assists": ("🤝", "Total Assists", "#22c55e"),
+                "gold_per_min": ("💰", "Avg GPM", "#f59e0b"),
+                "xp_per_min": ("⚡", "Avg XPM", "#8b5cf6"),
+                "last_hits": ("🎯", "Total Last Hits", "#60a5fa"),
+                "hero_damage": ("🔥", "Hero Damage", "#c84b31"),
+                "tower_damage": ("🏰", "Tower Damage", "#f97316"),
+                "hero_healing": ("💚", "Total Healing", "#10b981"),
+            }
+            total_rows = []
+            for row in totals_data:
+                field = row.get("field")
+                n = row.get("n", 0)
+                s = row.get("sum", 0)
+                if field in display_fields and n > 0:
+                    icon, label, color = display_fields[field]
+                    avg = s / n
+                    total_rows.append({"icon": icon, "label": label, "color": color,
+                                       "total": s, "avg": avg, "n": n, "field": field})
+            if total_rows:
+                tcols = st.columns(3)
+                for i, row in enumerate(total_rows):
+                    with tcols[i % 3]:
+                        if row["field"] in ("gold_per_min", "xp_per_min"):
+                            val_str = f"{row['avg']:.0f}"
+                            sub = f"over {row['n']} games"
+                        else:
+                            val_str = f"{row['total']:,.0f}"
+                            sub = f"avg {row['avg']:.0f}/game"
+                        kpi(row["icon"], row["label"], val_str, sub, row["color"])
+
+        sec("AI PERFORMANCE ANALYSIS", "🤖")
+        if st.button("Analyse Performance Trends", type="primary", key="ai_trends"):
+            if not _ai_available: _ai_warn()
+            else:
+                with st.spinner("Analysing..."):
+                    ctx = build_totals_context(totals_data, matches_300)
+                    prompt = f"""Performance data:\n{ctx}\n\nAnalyse:
+1. What habit or timing pattern stands out most (peak hours, day patterns)?
+2. Are there tilt indicators (long loss streaks, late-night losing)?
+3. One specific, actionable improvement to raise win rate.
+Start with a 2-sentence Dota lore narrative about perseverance then ---."""
+                    result = query_ollama(prompt, system="You are a Dota 2 performance coach. Be specific and direct.", max_tokens=600)
+                    if result:
+                        parts = result.split("---", 1)
+                        if len(parts) == 2:
+                            st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
+                    else: st.error("Could not reach Ollama.")
+    footer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 7 — Behavior
+# ══════════════════════════════════════════════════════════════════════════════
+with tab7:
+    banner(muerta_bg if IMG["muerta"] else cover_bg, "Behavior & Wards",
+           "Ward heatmap · chat word cloud · support quality · AI behavior read", height=160)
+
+    if not account_id:
+        st.info("Load a player in the sidebar to see behavior data.")
+    else:
+        with st.spinner("Loading behavior data..."):
+            wardmap_data = get_opendota_wardmap(account_id)
+            wordcloud_data = get_opendota_wordcloud(account_id)
+
+        obs = wardmap_data.get("obs") or {}
+        sen = wardmap_data.get("sen") or {}
+        my_words = wordcloud_data.get("my_word_counts") or {}
+
+        def flatten_wards(ward_dict):
+            pts = []
+            for xk, ydict in ward_dict.items():
+                if isinstance(ydict, dict):
+                    for yk, cnt in ydict.items():
+                        try:
+                            pts.extend([(int(xk), int(yk))] * min(int(cnt), 15))
+                        except Exception:
+                            pass
+            return pts
+
+        obs_pts = flatten_wards(obs)
+        sen_pts = flatten_wards(sen)
+
+        bkc1, bkc2, bkc3, bkc4 = st.columns(4)
+        with bkc1: kpi("👁️", "Observer Wards", str(len(obs_pts)), "placed across all games", "#60a5fa")
+        with bkc2: kpi("🔍", "Sentry Wards", str(len(sen_pts)), "placed across all games", "#f59e0b")
+        with bkc3:
+            ratio = len(sen_pts) / max(len(obs_pts), 1)
+            kpi("⚖️", "Sentry Ratio", f"{ratio:.2f}", "sentry per observer", "#8b5cf6")
+        with bkc4:
+            kpi("💬", "Words in Chat", f"{sum(my_words.values()):,}", f"{len(my_words)} unique words", "#22c55e")
+
+        sec("WARD PLACEMENT HEATMAP", "🗺️")
+        if obs_pts or sen_pts:
+            fig_ward = go.Figure()
+            if obs_pts:
+                fig_ward.add_trace(go.Scatter(
+                    x=[p[0] for p in obs_pts], y=[p[1] for p in obs_pts],
+                    mode="markers", name="Observer",
+                    marker=dict(size=7, color="rgba(96,165,250,0.65)", symbol="circle",
+                                line=dict(color="rgba(96,165,250,0.2)", width=1)),
+                    hovertemplate="Observer (%{x}, %{y})<extra></extra>",
+                ))
+            if sen_pts:
+                fig_ward.add_trace(go.Scatter(
+                    x=[p[0] for p in sen_pts], y=[p[1] for p in sen_pts],
+                    mode="markers", name="Sentry",
+                    marker=dict(size=7, color="rgba(251,191,36,0.65)", symbol="diamond",
+                                line=dict(color="rgba(251,191,36,0.2)", width=1)),
+                    hovertemplate="Sentry (%{x}, %{y})<extra></extra>",
+                ))
+            fig_ward.update_layout(
+                paper_bgcolor="#080c14", plot_bgcolor="#0a0e1a",
+                font_color="#64748b", height=420,
+                margin=dict(l=8,r=8,t=16,b=8),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-50, 300]),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-50, 300]),
+                legend=dict(font=dict(color="#94a3b8",size=11), bgcolor="rgba(0,0,0,0)",
+                            x=0.01, y=0.99),
+            )
+            st.plotly_chart(fig_ward, use_container_width=True)
+        else:
+            st.info("No ward data available for this player.")
+
+        if my_words:
+            sec("CHAT WORD CLOUD", "💬")
+            sorted_words = sorted(my_words.items(), key=lambda x: -x[1])[:60]
+            max_count = sorted_words[0][1] if sorted_words else 1
+            word_html = '<div style="display:flex;flex-wrap:wrap;gap:6px 10px;padding:20px;background:linear-gradient(135deg,#0d1520,#111d2e);border:1px solid #1a2840;border-radius:16px;line-height:1.8">'
+            for word, count in sorted_words:
+                pct = count / max_count
+                size = max(10, min(28, int(10 + pct * 18)))
+                weight = 700 if pct > 0.5 else 500 if pct > 0.25 else 400
+                r = int(200 * pct + 96 * (1 - pct))
+                g = int(75 * pct + 100 * (1 - pct))
+                b = int(49 * pct + 140 * (1 - pct))
+                alpha = max(0.45, min(1.0, 0.45 + pct * 0.55))
+                word_html += f'<span title="{count}x" style="font-size:{size}px;color:rgba({r},{g},{b},{alpha});font-weight:{weight};cursor:default">{word}</span>'
+            word_html += '</div>'
+            st.markdown(word_html, unsafe_allow_html=True)
+
+        sec("AI BEHAVIOR ANALYSIS", "🤖")
+        if st.button("Analyse Behavior", type="primary", key="ai_behavior"):
+            if not _ai_available: _ai_warn()
+            else:
+                with st.spinner("Analysing..."):
+                    ctx = build_behavior_context(wordcloud_data, wardmap_data)
+                    prompt = f"""Player behavior data:\n{ctx}\n\nAnalyse:
+1. What does the chat behavior reveal (toxic, friendly, shot-caller, silent)?
+2. What does the ward placement ratio say about support quality and vision game?
+3. One specific change that would most improve their win rate from a behavioral standpoint.
+Start with a 2-sentence Dota lore narrative about vision and control of the map then ---."""
+                    result = query_ollama(prompt, system="You are a Dota 2 behavioral analyst. Be direct and insightful.", max_tokens=600)
+                    if result:
+                        parts = result.split("---", 1)
+                        if len(parts) == 2:
+                            st.markdown(f'<div class="lore-box">✨ {parts[0].strip()}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="ai-output">{parts[1].strip()}</div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<div class="ai-output">{result}</div>', unsafe_allow_html=True)
+                    else: st.error("Could not reach Ollama.")
+    footer()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 8 — Draft Simulator
+# ══════════════════════════════════════════════════════════════════════════════
+with tab8:
     banner(heroes_bg, "Draft Simulator",
            "Build any draft · weighted random fill · AI strategy with hero lore", height=160)
 
@@ -1161,9 +1738,9 @@ Be specific about the heroes picked."""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — About
+# TAB 9 — About
 # ══════════════════════════════════════════════════════════════════════════════
-with tab5:
+with tab9:
     # Full logo banner
     st.markdown(f"""
     <div style="border-radius:24px;overflow:hidden;position:relative;height:280px;

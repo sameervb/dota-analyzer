@@ -861,10 +861,10 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "⚔️ Draft Simulator", "ℹ️ About"
 ])
 
-# Tab 0→heroes, 1→cover, 2→cover, 3→muerta, 4→heroes, 5→muerta, 6→cover, 7→muerta, 8→logo
+# Tab 0→heroes, 1→cover, 2→muerta, 3→heroes, 4→cover, 5→heroes, 6→muerta, 7→heroes, 8→logo
 inject_tab_bg_switcher([
-    IMG["heroes"], IMG["cover"], IMG["cover"], IMG["muerta"], IMG["heroes"],
-    IMG["muerta"], IMG["cover"], IMG["muerta"], IMG["logo"]
+    IMG["heroes"], IMG["cover"], IMG["muerta"], IMG["heroes"], IMG["cover"],
+    IMG["heroes"], IMG["muerta"], IMG["heroes"], IMG["logo"]
 ])
 
 

@@ -52,10 +52,10 @@ def load_assets():
 IMG = load_assets()
 
 # ── Global CSS ─────────────────────────────────────────────────────────────────
-heroes_bg = f'url("{IMG["heroes"]}")' if IMG["heroes"] else "none"
-cover_bg  = f'url("{IMG["cover"]}")' if IMG["cover"] else "none"
-logo_bg   = f'url("{IMG["logo"]}")' if IMG["logo"] else "none"
-muerta_bg = f'url("{IMG["muerta"]}")' if IMG["muerta"] else "none"
+heroes_bg = f"url('{IMG['heroes']}')" if IMG["heroes"] else "none"
+cover_bg  = f"url('{IMG['cover']}')"  if IMG["cover"]  else "none"
+logo_bg   = f"url('{IMG['logo']}')"   if IMG["logo"]   else "none"
+muerta_bg = f"url('{IMG['muerta']}')" if IMG["muerta"] else "none"
 
 st.markdown(f"""
 <style>

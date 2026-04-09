@@ -826,6 +826,21 @@ with st.sidebar:
             "gemma2:9b":    "⚖️ balanced · ~20s",
             "qwen2.5:7b":   "⚖️ balanced · ~20s",
         }
+        def _model_label(m: str) -> str:
+            if m in _MODEL_DESC:
+                return f"{m} — {_MODEL_DESC[m]}"
+            n = m.lower()
+            if any(x in n for x in ["34b","70b","72b","65b","40b"]): hint = "🐘 large · ~2m+"
+            elif any(x in n for x in ["13b","14b","20b","30b"]): hint = "🧠 capable · ~1m"
+            elif any(x in n for x in ["7b","8b","9b"]): hint = "⚖️ balanced · ~30s"
+            elif any(x in n for x in ["3b","4b","6b"]): hint = "⚡ fast · ~15s"
+            elif any(x in n for x in ["mini","tiny","small","nano"]): hint = "⚡ fastest · ~5s"
+            elif "llava" in n: hint = "👁️ vision · ~30s"
+            elif "deepseek" in n: hint = "🔬 reasoning · slow"
+            elif "code" in n: hint = "💻 code · ~20s"
+            elif any(x in n for x in ["neural","orca","chat"]): hint = "💬 chat · ~20s"
+            else: hint = "🤖 ~20s"
+            return f"{m} — {hint}"
         available_models = detect_ollama_models()
         if available_models:
             gpu_status = detect_gpu()
@@ -836,7 +851,7 @@ with st.sidebar:
             chosen = st.selectbox(
                 "Model", available_models, index=default_idx,
                 label_visibility="collapsed",
-                format_func=lambda m: f"{m} — {_MODEL_DESC[m]}" if m in _MODEL_DESC else m,
+                format_func=_model_label,
             )
             if chosen != st.session_state.get("selected_model"):
                 st.session_state["selected_model"] = chosen

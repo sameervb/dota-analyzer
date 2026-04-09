@@ -247,18 +247,23 @@ with tab_overview:
         st.markdown(chips, unsafe_allow_html=True)
 
     # AI overview
-    if _ai_available and recent and st.button("✨ Generate AI performance summary", key="ai_overview"):
-        context = f"Player: {name}\nWin rate: {win_rate:.1f}% ({wins}W/{losses}L)\n"
-        context += f"Avg KDA (last 20): {sum(kills)/len(kills):.1f}/{sum(deaths)/len(deaths):.1f}/{sum(assists)/len(assists):.1f}\n"
-        context += f"Avg GPM: {sum(gpms)/len(gpms):.0f}\n"
-        context += f"Most played: {', '.join(h for h, _ in top_heroes[:5])}\n"
-        with st.spinner("Analysing..."):
-            analysis = query_ollama(
-                f"Analyse this Dota 2 player's recent performance and give concise insights:\n\n{context}",
-                system="You are a Dota 2 coach. Be specific, direct, and helpful. 3-5 sentences max."
-            )
-        if analysis:
-            st.info(analysis)
+    if recent and st.button("✨ Generate AI performance summary", key="ai_overview"):
+        if not _ai_available:
+            st.warning("AI analysis requires Ollama. Set `OLLAMA_BASE_URL` in Streamlit Cloud → Settings → Secrets.")
+        else:
+            context = f"Player: {name}\nWin rate: {win_rate:.1f}% ({wins}W/{losses}L)\n"
+            context += f"Avg KDA (last 20): {sum(kills)/len(kills):.1f}/{sum(deaths)/len(deaths):.1f}/{sum(assists)/len(assists):.1f}\n"
+            context += f"Avg GPM: {sum(gpms)/len(gpms):.0f}\n"
+            context += f"Most played: {', '.join(h for h, _ in top_heroes[:5])}\n"
+            with st.spinner("Analysing..."):
+                analysis = query_ollama(
+                    f"Analyse this Dota 2 player's recent performance and give concise insights:\n\n{context}",
+                    system="You are a Dota 2 coach. Be specific, direct, and helpful. 3-5 sentences max."
+                )
+            if analysis:
+                st.info(analysis)
+            else:
+                st.error("Could not reach Ollama. Check your tunnel URL in secrets.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -283,7 +288,7 @@ with tab_matches:
             won = (is_radiant and radiant_win) or (not is_radiant and not radiant_win)
             duration_min = round((m.get("duration", 0)) / 60, 1)
             start = m.get("start_time")
-            date_str = datetime.utcfromtimestamp(start).strftime("%d %b %Y") if start else "-"
+            date_str = datetime.fromtimestamp(start).strftime("%d %b %Y") if start else "-"
             rows.append({
                 "Date": date_str,
                 "Hero": hname,
@@ -296,7 +301,7 @@ with tab_matches:
             })
 
         df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
 
         # Quick select for match analyzer
         match_ids = [str(m.get("match_id")) for m in matches if m.get("match_id")]
@@ -347,7 +352,7 @@ with tab_analyzer:
                 st.metric("Score", f"{radiant_score} — {dire_score}")
 
             if start_time:
-                st.caption(f"Played: {datetime.utcfromtimestamp(start_time).strftime('%d %b %Y %H:%M')} UTC")
+                st.caption(f"Played: {datetime.fromtimestamp(start_time).strftime('%d %b %Y %H:%M')}")
 
             # Picks/bans
             picks_bans = match_data.get("picks_bans") or []
@@ -395,8 +400,10 @@ with tab_analyzer:
                 st.line_chart(chart_df.set_index("Minute"))
 
             # AI analysis
-            if _ai_available:
-                if st.button("✨ AI match analysis", key="ai_match"):
+            if st.button("✨ AI match analysis", key="ai_match"):
+                if not _ai_available:
+                    st.warning("AI analysis requires Ollama. Set `OLLAMA_BASE_URL` in Streamlit Cloud → Settings → Secrets.")
+                else:
                     ctx = build_dota_match_context(match_data, hero_map)
                     with st.spinner("Analysing match..."):
                         analysis = query_ollama(
@@ -406,8 +413,8 @@ with tab_analyzer:
                     if analysis:
                         st.markdown("**AI analysis:**")
                         st.markdown(analysis)
-            else:
-                st.caption("Start the AI server to enable match analysis.")
+                    else:
+                        st.error("Could not reach Ollama. Check your tunnel URL in secrets.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -449,11 +456,13 @@ with tab_draft:
             st.rerun()
 
     with btn_col2:
-        if st.button("✨ Get AI strategy", use_container_width=True, type="primary", disabled=not _ai_available):
+        if st.button("✨ Get AI strategy", use_container_width=True, type="primary"):
             active_r = [h for h in radiant_picks if h]
             active_d = [h for h in dire_picks if h]
             if not active_r and not active_d:
                 st.warning("Pick at least one hero to get a strategy.")
+            elif not _ai_available:
+                st.warning("AI analysis requires Ollama. Set `OLLAMA_BASE_URL` in Streamlit Cloud → Settings → Secrets.")
             else:
                 draft_context = f"Radiant: {', '.join(active_r) or 'unknown'}\nDire: {', '.join(active_d) or 'unknown'}"
                 with st.spinner("Generating strategy..."):
@@ -468,8 +477,8 @@ with tab_draft:
                 if strategy:
                     st.markdown("**Draft strategy:**")
                     st.markdown(strategy)
-                elif not _ai_available:
-                    st.info("AI server not available. Start Ollama to enable strategy generation.")
+                else:
+                    st.error("Could not reach Ollama. Check your tunnel URL in secrets.")
 
     # Show random draft result
     if st.session_state.get("rand_radiant"):

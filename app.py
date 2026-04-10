@@ -765,6 +765,7 @@ def footer():
     st.markdown("""
     <div class="footer">
         Built by <strong>Sameer Bhalerao</strong> · Senior Analytics & AI Product Leader · Amazon L6<br>
+        <a href="https://sameerbhalerao.com" target="_blank">sameerbhalerao.com</a> ·
         Part of the <a href="https://soulspark.me" target="_blank">Soul Spark</a> portfolio ·
         Data: <a href="https://www.opendota.com" target="_blank">OpenDota API</a> ·
         <a href="https://github.com/sameervb/dota-analyzer" target="_blank">GitHub</a> ·
@@ -1932,6 +1933,7 @@ with tab9:
             <div style="font-size:1.1rem;font-weight:700;color:#e2e8f0">Sameer Bhalerao</div>
             <div style="color:#4b5a7a;font-size:0.85rem;margin-top:2px">Senior Analytics & AI Product Leader · Amazon L6</div>
             <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+                <a href="https://sameerbhalerao.com" target="_blank" style="background:#12100a;border:1px solid #3d2e00;border-radius:8px;padding:6px 14px;color:#f59e0b;font-size:0.8rem;text-decoration:none">Portfolio</a>
                 <a href="https://www.linkedin.com/in/sameervb" target="_blank" style="background:#0d1e30;border:1px solid #1a3050;border-radius:8px;padding:6px 14px;color:#60a5fa;font-size:0.8rem;text-decoration:none">LinkedIn</a>
                 <a href="https://github.com/sameervb" target="_blank" style="background:#0d1e30;border:1px solid #1a3050;border-radius:8px;padding:6px 14px;color:#94a3b8;font-size:0.8rem;text-decoration:none">GitHub</a>
                 <a href="https://soulspark.me" target="_blank" style="background:#1a0a08;border:1px solid #4a1a10;border-radius:8px;padding:6px 14px;color:#c84b31;font-size:0.8rem;text-decoration:none">Soul Spark</a>

@@ -1,68 +1,151 @@
-# Dota 2 Analyzer
+<div align="center">
 
-A public Streamlit app for exploring Dota 2 player stats, match history, and draft strategy — powered by the [OpenDota API](https://docs.opendota.com/) and a local LLM (Ollama).
+# 🎮 Dota 2 Analyzer
+
+**Explore any player's stats, match breakdowns, hero pool, peer synergy, and draft strategy — powered by OpenDota's public API and a local LLM. No login. No API key needed.**
+
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io)
+[![OpenDota](https://img.shields.io/badge/OpenDota_API-public-4A90D9?style=flat)](https://docs.opendota.com)
+[![Ollama](https://img.shields.io/badge/LLM-Ollama-black?style=flat)](https://ollama.ai)
+[![Plotly](https://img.shields.io/badge/Charts-Plotly-3F4F75?style=flat&logo=plotly)](https://plotly.com)
+[![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat)](LICENSE)
+
+[**Soul Spark**](https://soulspark.me) · [**LinkedIn**](https://linkedin.com/in/sameervb) · [**GitHub**](https://github.com/sameervb)
+
+</div>
+
+---
+
+## What It Does
+
+Enter any Dota 2 account ID and get a full intelligence report — hero pool, win streaks, peer synergy, ward patterns, and behaviour score. Drill into any match for picks/bans, individual player performance, and an AI-generated game breakdown. Run draft simulations with AI strategy recommendations for both sides.
+
+All data comes from [OpenDota's public API](https://docs.opendota.com) — no authentication, no scraping, no API key required.
+
+---
 
 ## Features
 
-- **Player Overview** — win rate, K/D/A, GPM/XPM, most-played heroes
-- **Match History** — filterable table of recent matches with outcomes and stats
-- **Match Analyzer** — full breakdown of any match: picks/bans, player performance, gold advantage chart, and AI analysis
-- **Draft Simulator** — pick heroes for Radiant and Dire, auto-fill remaining slots with weighted-random logic, get AI strategy advice
+| Tab | What you get |
+|-----|-------------|
+| **📊 Overview** | Win rate, K/D/A, GPM/XPM, most-played heroes, recent form summary |
+| **🕹️ Match History** | Last 20 matches — hero, outcome, KDA, duration, lobby type |
+| **🔍 Match Analyzer** | Full breakdown: picks/bans timeline, player performance table, gold advantage chart, AI match analysis |
+| **🦸 Heroes** | Complete hero pool — games played, win rate, KDA, impact score vs. global benchmark |
+| **👥 Peers** | Most frequent teammates — win rate synergy, games together, queue recommendations |
+| **📈 Trends** | Activity heatmap by day and hour, win/loss streaks, performance trend lines |
+| **🗺️ Behavior** | Ward placement map, behaviour score history, abandons, reports, commends |
+| **⚔️ Draft Simulator** | Pick heroes for Radiant and Dire, auto-complete remaining slots, get AI strategy brief for both sides |
+| **ℹ️ About** | Project context and links |
+
+---
 
 ## Tech Stack
 
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white)
-![OpenDota](https://img.shields.io/badge/OpenDota_API-public-blue)
-![Ollama](https://img.shields.io/badge/LLM-Ollama-black)
-![Plotly](https://img.shields.io/badge/Charts-Plotly-3F4F75?style=flat&logo=plotly)
+| Layer | Technology |
+|-------|-----------|
+| UI & hosting | Streamlit |
+| Data | OpenDota public API (no API key required) |
+| Hero data | OpenDota hero stats + cached hero map |
+| Visualisations | Plotly — bar charts, heatmaps, line charts, ward map |
+| AI | Ollama (local LLM) via Cloudflare Tunnel |
+| Language | Python 3.10+ |
 
-- **Data**: OpenDota public API (no API key required)
-- **AI Analysis**: Ollama running locally, tunnelled via Cloudflare for cloud deployment
-- **Hosting**: Streamlit Community Cloud
-- **No login. No profile. No data stored.**
+---
 
-## Local Setup
+## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/dota-analyzer
+git clone https://github.com/sameervb/dota-analyzer
 cd dota-analyzer
 pip install -r requirements.txt
 
-# Copy and fill in secrets
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit secrets.toml with your Ollama URL
+# Edit secrets.toml — Ollama URL is optional
 
 streamlit run app.py
 ```
 
-## Streamlit Cloud Deployment
+---
 
-1. Push this repo to GitHub (keep `.streamlit/secrets.toml` in `.gitignore`)
-2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → select this repo
-3. Under **Advanced settings → Secrets**, paste the contents of `secrets.toml.example` with your values filled in
-4. Deploy
+## Secrets
 
-## Ollama via Cloudflare Tunnel
+```toml
+# .streamlit/secrets.toml
 
-The AI features require an Ollama instance. For Streamlit Community Cloud:
+# Optional — enables AI analysis in Match Analyzer, Draft Simulator, and Behavior tabs
+OLLAMA_BASE_URL = "https://your-tunnel.trycloudflare.com"
+OLLAMA_MODEL    = "llama3.1:8b"
+```
+
+Ollama is **optional**. All nine tabs work without it. AI-powered sections show a graceful fallback when no Ollama instance is reachable.
+
+---
+
+## How to Find Your Account ID
+
+1. Go to [opendota.com](https://www.opendota.com)
+2. Search your Steam username
+3. Copy the numeric ID from the URL — e.g. `opendota.com/players/87278757`
+
+Or search directly in the app sidebar.
+
+---
+
+## Deploying to Streamlit Cloud
+
+1. Fork / push this repo to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io) → New App → select this repo
+3. Under **Advanced settings → Secrets**, paste:
+
+```toml
+OLLAMA_BASE_URL = "https://your-cloudflare-url.trycloudflare.com"
+OLLAMA_MODEL    = "llama3.1:8b"
+```
+
+### Cloudflare Tunnel — expose local Ollama to the cloud
 
 ```bash
-# On your local machine (with Ollama running):
+# Run on your machine while Ollama is running on port 11434
 cloudflared tunnel --url http://localhost:11434
 ```
 
-Copy the generated `*.trycloudflare.com` URL into your Streamlit Cloud secrets as `OLLAMA_BASE_URL`.
+Paste the generated `*.trycloudflare.com` URL as `OLLAMA_BASE_URL` in Streamlit Cloud secrets.
+
+---
 
 ## Architecture
 
 ```
-Browser → Streamlit Cloud → OpenDota API (public)
-                         → Cloudflare Tunnel → Ollama (your machine)
-```
+Browser → Streamlit Cloud → OpenDota API (public, read-only, no key)
+                         │
+                         ├── Player stats · Match data · Hero pool
+                         ├── Peers · Trends · Wards · Behavior score
+                         │
+                         └── Cloudflare Tunnel ──→ Ollama (your machine)
+                                                    ├── Match analysis
+                                                    ├── Draft strategy
+                                                    └── Behavior insights
 
-No user data is stored. All API calls are read-only. The LLM prompt is built from match/player data and sent directly to Ollama — nothing is logged server-side.
+No user data stored. All API calls are read-only.
+All LLM inference runs on your local machine.
+```
 
 ---
 
-Built as part of a standalone portfolio series extracted from [Soul Spark](https://soulspark.me) — a local-first personal intelligence platform.
+## Project Context
+
+Built as a standalone portfolio app, part of a series extracted from [Soul Spark](https://soulspark.me) — a local-first personal intelligence platform integrating finance, health, career, and growth into a unified conversational AI advisor.
+
+**Related apps in this series:**
+- [jd-analyzer](https://github.com/sameervb/jd-analyzer) — Resume-to-JD fit scorer and cover letter generator
+- [journey-planner](https://github.com/sameervb/journey-planner) — Multi-modal route optimizer and AI travel advisor
+
+---
+
+<div align="center">
+
+Built by [Sameer Bhalerao](https://linkedin.com/in/sameervb) · Senior Analytics & AI Product Leader · Amazon L6 BIE · Luxembourg
+
+</div>
